@@ -16,39 +16,31 @@ spec:
     volumeMounts:
     - mountPath: "/root/.m2/repository"
       name: cache
+
   - name: git
-    image: bitnami/git:2.46.0
+    image: bitnami/git:latest
     command: ["cat"]
     tty: true
-  - name: docker
-    image: docker:latest
-    command: ["cat"]
-    tty: true
-    volumeMounts: 
-    - name: docker-sock
-      mountPath: /var/run/docker.sock
+
   - name: sonarcli
-    image: sonarsource/sonar-scanner-cli:latest
+    image: ganeshkumar20/sonarcli:rootca
     command: ["cat"]
     tty: true
     volumeMounts:
-      - name: devops-truststore
+      - name: ca-certificates
         mountPath: /custom-ca
         readOnly: false
     env:
       - name: SONAR_SCANNER_OPTS
-        value: "-Djavax.net.ssl.trustStore=/custom-ca/devops-truststore.jks -Djavax.net.ssl.trustStorePassword=changeit"
+        value: "-Djavax.net.ssl.trustStore=/custom-ca/sonarqube-truststore.jks -Djavax.net.ssl.trustStorePassword=changeit"
 
   volumes:
   - name: cache
     persistentVolumeClaim:
       claimName: maven-cache
-  - name: docker-sock
-    hostPath: 
-      path: /var/run/docker.sock
-  - name: devops-truststore
-    secret:
-      secretName: devops-truststore
+  - name: ca-certificates
+    configMap:
+      name: ca-certificates
     '''
 }
 
@@ -59,11 +51,6 @@ spec:
         NEXUS_URL = "nexus-service.nexus.svc.rke-cluster:8081/nexus"
         NEXUS_REPOSITORY = "maven-hosted"
         NEXUS_CREDENTIAL_ID = "nexus-creds"
-        DOCKER_HUB_USERNAME="docker-username"
-        DOCKER_HUB_PASSWORD="docker-password"
-        DOCKER_APP="spring-petclinic"
-        IMAGE_NAME="${DOCKER_HUB_USERNAME}" + "/" + "${DOCKER_APP}"
-        IMAGE_TAG="$BUILD_NUMBER"
     }
     stages {
         stage('Clone repo') {
@@ -104,6 +91,7 @@ spec:
                             -Dsonar.language=java \
                             -Dsonar.sourceEncoding=UTF-8 \
                             -Dsonar.java.libraries=target/classes \
+                            -Dsonar.ssl.verify=false
                         '''
                     }
                 }
@@ -156,24 +144,6 @@ spec:
                             error "*** File: ${artifactPath}, could not be found";
                         }
                     }
-                }
-                
-            }
-        }
-        stage('Docker build') {
-            steps {
-                container ('docker') {
-                    
-                    sh "docker build -t $IMAGE_NAME:$IMAGE_TAG ."
-                    sh "docker tag $IMAGE_NAME:IMAGE_TAG $IMAGE_NAME:latest"
-                    withCredentials([usernamePassword(credentialsId: 'docker', passwordVariable: 'passwd', usernameVariable: 'uname')]) {
-                        sh "docker login -u $uname -p $passwd"
-                        sh "docker push $IMAGE_NAME:$IMAGE_TAG"
-                        sh "docker push $IMAGE_NAME:latest"
-                    }
-
-                    sh "docker rmi $IMAGE_NAME:$IMAGE_TAG"
-                    sh "docker rmi $IMAGE_NAME:latest"
                 }
             }
         }
